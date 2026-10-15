@@ -13,6 +13,7 @@ and run it as SYSTEM. Every method below uses the same wrapper, `Invoke-MoveItMi
 | Device type | Method | Folder |
 | --- | --- | --- |
 | Entra-joined | Intune Win32 app | `intune/` |
+| Managed by Iru (formerly Kandji) | Iru custom PowerShell script | `iru/` |
 | Hybrid / AD-joined | Group Policy startup script | `gpo/` |
 | Any, via your RMM | Run the wrapper as a SYSTEM script | below |
 
