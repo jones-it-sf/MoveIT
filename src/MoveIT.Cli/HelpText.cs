@@ -12,6 +12,7 @@ internal static class HelpText
           moveit migrate --map <file.csv> [options]
           moveit migrate --config <file.json> [--what-if] [--yes] [--verbose] [--log <file>]
           moveit rollback --backup <folder> [--delete-created-account] [--yes]
+          moveit push --computers <file> (--config <file.json> | --args "...") [options]
           moveit sid --object-id <Entra object ID>  |  moveit sid --sid <S-1-12-1-...>
           moveit version
 
@@ -60,6 +61,16 @@ internal static class HelpText
           --backup <folder>           Backup folder printed by migrate.
           --delete-created-account    Also delete the local account if migrate created it.
           Leaving Entra ID cannot be rolled back; rejoin the device instead.
+
+        PUSH (run a migration on remote machines)
+          --computers <file>          Text file of computer names (one per line, # for comments).
+          --computer <names>          Or a comma-separated list instead of a file.
+          --config <file.json>        Config copied to and run on each machine.
+          --args "migrate --all ..."  Or arguments to run verbatim on each machine.
+          --parallel <N>              Machines to work on at once (default 10).
+          --results-dir <folder>      Where per-machine logs are gathered.
+          Copies moveit.exe to each machine's admin share and runs it as SYSTEM via a scheduled task.
+          Run it as an administrator the target machines trust (needs SMB and the Task Scheduler).
 
         EXAMPLES
           moveit migrate --source AzureAD\JohnSmith --target jsmith --create --admin --what-if

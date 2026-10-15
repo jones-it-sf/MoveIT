@@ -24,6 +24,9 @@ internal static class CommandLine
             ["create", "admin", "must-change-password", "overwrite-target-profile", "leave-entra", "reboot", "what-if", "force", "yes", "verbose", "all", "generate-passwords", "disable-source", "delete-source"],
             ["source", "target", "full-name", "password-env", "acl-mode", "config", "log", "backup-root", "map", "exclude", "name-prefix", "credentials-out", "after-each", "after-all"]),
         ["rollback"] = new(["delete-created-account", "yes", "verbose"], ["backup", "log"]),
+        ["push"] = new(
+            ["yes", "verbose"],
+            ["computers", "computer", "config", "args", "parallel", "results-dir", "stage", "task-name", "log"]),
         ["sid"] = new([], ["object-id", "sid"]),
         ["help"] = new([], []),
         ["version"] = new([], []),

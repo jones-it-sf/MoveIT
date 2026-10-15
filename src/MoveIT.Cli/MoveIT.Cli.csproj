@@ -22,6 +22,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Embedded so 'moveit push' can stage the wrapper on remote machines from the single exe. -->
+    <EmbeddedResource Include="..\..\deploy\Invoke-MoveItMigration.ps1" LogicalName="moveit.wrapper.ps1" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="MoveIT.Core.Tests" />
   </ItemGroup>
 

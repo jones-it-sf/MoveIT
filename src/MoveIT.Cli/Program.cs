@@ -39,6 +39,7 @@ try
         "list" => ListCommand.Run(command),
         "migrate" => MigrateCommand.Run(command),
         "rollback" => RollbackCommand.Run(command),
+        "push" => PushCommand.Run(command),
         _ => throw new CommandLineException($"Unknown command '{command.Name}'."),
     };
 }
