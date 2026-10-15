@@ -1,22 +1,29 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Runs a MoveIT migration from Iru (formerly Kandji) on Windows, via the Iru Agent's
-    custom PowerShell script channel.
+    Remediation script for the Iru (formerly Kandji) Windows Custom Script Library Item.
 
 .DESCRIPTION
-    Paste this into an Iru "custom script" Library Item assigned to a Windows Blueprint. The Iru
-    Agent runs it in the agent's context (SYSTEM). It:
+    Paste this into the "Remediation Script" field of a Windows Custom Script Library Item (the audit
+    script is Audit-MoveItMigration.ps1). Iru runs this, as SYSTEM, whenever the audit reports the
+    device is not yet migrated. It:
 
-      1. exits early if the migration already ran on this device (the done marker),
-      2. optionally defers while an interactive user is still logged on (MoveIT cannot migrate a
-         profile that is currently loaded),
-      3. downloads a package .zip (moveit.exe + Invoke-MoveItMigration.ps1 + moveit.json) that you
+      1. defers (does nothing) while an interactive user is logged on, so MoveIT never tries to
+         migrate a loaded profile. Iru retries on the next check-in,
+      2. downloads a package .zip (moveit.exe + Invoke-MoveItMigration.ps1 + moveit.json) that you
          host, verifies its hash, and extracts it,
-      4. runs the standard wrapper (Invoke-MoveItMigration.ps1) so exit-code mapping and the
-         run-once marker behave exactly like every other deployment method.
+      3. runs the standard wrapper, which performs the migration and writes the done marker on
+         success. Once the marker exists, the audit passes and Iru stops running this.
 
-    Exit codes (what Iru sees): 0 = success or deferred or already done; non-zero = failure.
+    Exit codes (what Iru sees):
+      0   migration succeeded (triggers the restart timer if you enabled "Restart after successful
+          execution" on the Library Item; shows as Remediated)
+      10  deferred because a user is logged on (shows as an alert; will retry next check-in)
+      other non-zero = failure (shows as an alert; see the output and the MoveIT log)
+
+    Let Iru own the reboot: enable "Restart after a successful execution" on the Library Item and keep
+    "reboot": false in moveit.json, so users get the agent's restart countdown instead of an abrupt
+    reboot from MoveIT.
 
     Edit the CONFIG block below. Nothing else needs changing.
 #>
@@ -33,8 +40,8 @@ $PackageUrl = 'https://example.com/moveit/moveit-package.zip'
 # Get it with:  (Get-FileHash .\moveit-package.zip -Algorithm SHA256).Hash
 $PackageSha256 = ''
 
-# If $true, skip (and retry on the next agent check-in) when any user is logged on.
-# Leave this $true unless you run during a maintenance window with no one signed in.
+# If $true, defer (exit 10) while any user is logged on. Leave $true unless you deliberately
+# want to migrate while someone may be signed in (MoveIT will refuse a loaded profile anyway).
 $DeferIfUserLoggedOn = $true
 
 # Extra arguments to moveit.exe instead of using moveit.json. Leave @() to use the config.
@@ -69,12 +76,12 @@ $exitCode = 1
 $work = $null
 try {
     if (Test-Path $markerPath) {
-        Write-Host "Already migrated on this device (marker $markerPath present). Nothing to do."
+        Write-Host "Already migrated (marker present). Nothing to do."
         $exitCode = 0
     }
     elseif ($DeferIfUserLoggedOn -and (Test-AnyUserLoggedOn)) {
-        Write-Host "A user is logged on; deferring until no one is signed in. Will retry next check-in."
-        $exitCode = 0
+        Write-Host "DEFERRED: a user is logged on. Will retry on the next check-in."
+        $exitCode = 10
     }
     else {
         if ([string]::IsNullOrWhiteSpace($PackageUrl) -or $PackageUrl -like '*example.com*') {
@@ -119,7 +126,7 @@ try {
     }
 }
 catch {
-    Write-Host "Iru bootstrapper error: $($_.Exception.Message)"
+    Write-Host "Iru remediation error: $($_.Exception.Message)"
     $exitCode = 1
 }
 finally {

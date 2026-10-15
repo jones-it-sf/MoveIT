@@ -1,96 +1,86 @@
 # Deploying MoveIT with Iru (formerly Kandji)
 
 Iru added Windows management (Iru Endpoint), using Microsoft's MDM framework plus the **Iru Agent**.
-The agent can deploy apps and **run custom PowerShell scripts** on enrolled Windows computers, which
-is the hook MoveIT uses. You deliver MoveIT with a small bootstrapper script, `Deploy-MoveItViaIru.ps1`,
-pasted into an Iru custom-script Library Item.
+The agent runs PowerShell on Windows through a **Custom Script Library Item** that uses an
+**audit + remediation** model, and MoveIT plugs straight into it. The agent, not our script, handles
+the retry loop, the SYSTEM context, status reporting, and the post-migration reboot.
+
+## Why the audit/remediation model fits
+
+A Windows Custom Script Library Item has two scripts and an execution frequency:
+
+- The **audit script** decides whether the device is already in the desired state.
+- The **remediation script** runs, as SYSTEM, whenever the audit says it is not.
+- With frequency **"Install once per device"**, Iru **reruns the audit on every check-in (about every
+  15 minutes) until it passes**, running remediation each time it fails.
+
+That gives us exactly what in-place migration needs for free:
+
+- **Deferral until no one is signed in.** MoveIT cannot migrate a loaded profile, so the remediation
+  script does nothing (exits `10`) while a user is logged on. Iru simply tries again next check-in, so
+  a device migrates the first time it checks in with no one signed in. No maintenance window required.
+- **A built-in retry loop** until the migration actually succeeds (the audit keeps failing until the
+  done marker exists).
+- **A native reboot.** Turn on "Restart after a successful execution" and the user gets the agent's
+  30-minute restart countdown when remediation succeeds. Keep `"reboot": false` in `moveit.json` so
+  MoveIT does not reboot on its own.
+- **Progress tracking.** In the Iru console, **Pass = migrated**, an alert with a "DEFERRED" message =
+  waiting for the user to sign out, and any other alert = a real failure (the output and the MoveIT
+  log tell you which).
 
 ## Before you start: does your fleet qualify?
 
-Iru's Windows support has real limits. Check these first:
-
 - **OS:** Windows 11 **24H2, 25H2, or 26H2 only**, on **Pro, Pro Education, Enterprise, or Education**.
-  Windows 10 and any Home edition cannot be managed by Iru, so this path will not reach them. For
-  those, use the RMM or GPO methods in [`../README.md`](../README.md).
-- **Agent context:** the Iru Agent runs scripts as SYSTEM. MoveIT needs that. Confirm in your tenant
-  if unsure.
-- **Architecture:** build the `win-x64` package for Intel/AMD PCs and `win-arm64` for ARM PCs. If your
-  fleet is mixed, host one package per architecture and assign them to separate Blueprints.
+  Windows 10 and Home editions cannot be managed by Iru; use the RMM or GPO path in
+  [`../README.md`](../README.md) for those.
+- **Architecture:** build the `win-x64` package for Intel/AMD and `win-arm64` for ARM. For a mixed
+  fleet, host one package per architecture and assign them to separate Blueprints.
+- Scripts run at SYSTEM, which is what MoveIT needs.
 
-## How it works
+## 1. Build and host the package
 
-The bootstrapper does not carry the binary itself. It downloads a **package `.zip` you host**, then
-runs the same wrapper every other method uses, so behavior (exit codes, the run-once marker) is
-identical everywhere.
-
-```
-Iru Agent runs Deploy-MoveItViaIru.ps1 (as SYSTEM)
-   -> downloads moveit-package.zip from your URL
-   -> runs Invoke-MoveItMigration.ps1 -ConfigPath moveit.json -RunOnce
-      -> runs moveit.exe, writes C:\ProgramData\MoveIT\migration.done on success
-```
-
-## 1. Build the package
-
-Put these three files in a folder and zip them (zip the files, not the folder):
+Zip these three files together (zip the files, not the folder):
 
 - `moveit.exe` from `dotnet publish src/MoveIT.Cli -c Release -r win-x64` (or `-r win-arm64`)
 - `Invoke-MoveItMigration.ps1` from [`../`](../)
-- `moveit.json` (your config, e.g. a copy of [`../../samples/migrate-all.json`](../../samples/migrate-all.json))
+- `moveit.json` (your config, e.g. a copy of [`../../samples/migrate-all.json`](../../samples/migrate-all.json),
+  with `"reboot": false` so Iru owns the reboot)
 
-Then record the hash for the script to verify:
+Record the hash and host the `.zip` somewhere the devices can reach over HTTPS (Azure Blob + SAS, S3,
+a GitHub release asset, or an internal web server):
 
 ```powershell
 (Get-FileHash .\moveit-package.zip -Algorithm SHA256).Hash
 ```
 
-## 2. Host the package
+## 2. Create the Windows Custom Script Library Item
 
-Put `moveit-package.zip` somewhere the devices can reach over HTTPS: Azure Blob Storage with a SAS
-URL, an S3 object, a GitHub release asset (the repo's CI already publishes the binaries as artifacts),
-or an internal web server. Copy the URL.
+In Iru Endpoint, add a **Custom Script** Library Item for Windows, assign it to your Windows
+Blueprint, and set:
 
-## 3. Create the Iru custom script
+- **Execution Frequency:** Install once per device.
+- **Audit Script:** paste [`Audit-MoveItMigration.ps1`](Audit-MoveItMigration.ps1) as-is.
+- **Remediation Script:** paste [`Remediate-MoveItMigration.ps1`](Remediate-MoveItMigration.ps1) and
+  edit its CONFIG block (`$PackageUrl`, `$PackageSha256`, and optionally `$ExtraArgs`).
+- **Restart after a successful execution:** enable this if the migration should reboot (recommended
+  when `leaveEntra` is set). Users get a 30-minute countdown.
 
-In Iru Endpoint, add a **custom script** Library Item for Windows and assign it to your Windows
-Blueprint. Paste in `Deploy-MoveItViaIru.ps1` and edit the CONFIG block at the top:
+Each custom script has a 1-hour execution timeout, which is far more than a migration needs.
 
-- `$PackageUrl` = your package URL from step 2.
-- `$PackageSha256` = the hash from step 1 (recommended).
-- `$DeferIfUserLoggedOn` = `$true` (default) so it waits for a device with no one signed in.
-- `$ExtraArgs` = leave empty to use `moveit.json`, or pass arguments directly, e.g.
-  `@('migrate','--all','--generate-passwords','--leave-entra')`.
+## 3. Roll out and watch
 
-The script exits **0** on success, when it defers (a user is logged on), or when the device already
-migrated, and **non-zero** on failure, which is what Iru expects from a custom script.
+Assign to a pilot device group first. In the console, devices move to **Pass** as they migrate.
+Anything stuck shows its output: a "DEFERRED" message means it is just waiting for the user to sign
+out, anything else is a failure to investigate.
 
-## The thing to plan for: nobody can be signed in
-
-This is the one real constraint of in-place profile migration via any MDM, not specific to Iru.
-MoveIT refuses to migrate a profile that is currently loaded, so the target user must be **signed
-out** when the script runs. Agent scripts normally run on check-in, while the user is active, so:
-
-- The bootstrapper defaults to **deferring** (exit 0, retry later) whenever any interactive user is
-  logged on. On its own, that means it only runs if it happens to check in at the login screen.
-- The reliable pattern is a **maintenance window**: schedule a reboot (or have users sign out) for a
-  window, so devices sit at the login screen and the next agent check-in migrates them.
-- If you want a hands-off "migrate at next boot, before anyone logs in" flow instead of relying on
-  catching the login screen, tell me and I will add a startup-staging mode to the wrapper (it installs
-  a one-time boot task and triggers a scheduled reboot).
-
-Set the reboot in `moveit.json` (`"reboot": true`) or handle it in your window. Do not use the
-wrapper's `-ReturnRebootCode` here; a script runner treats a non-zero (3010) exit as a failure.
-
-## Testing on your UTM VM
-
-If you want to test the Iru path (not just run the exe locally), note Iru enrollment needs a
-**stable serial number** on the VM and **TPM 2.0** enabled, and the VM must run a supported Windows 11
-build and edition. To just prove the migration works first, you can skip Iru entirely and run the
-integration harness in [`../../tests/integration`](../../tests/integration/README.md).
-
-## Collecting results
-
-- Bootstrapper and wrapper logs: `C:\ProgramData\MoveIT\Logs\`
+- Logs on the device: `C:\ProgramData\MoveIT\Logs\`
 - Done marker: `C:\ProgramData\MoveIT\migration.done`
 - If you used `--generate-passwords`, the credentials CSV is under the backup root. Store it securely
   and delete it after handing out passwords.
+
+## Testing on your UTM VM
+
+To test the Iru path end to end, enrollment needs a **stable serial number** on the VM and **TPM 2.0**
+enabled, on a supported Windows 11 build and edition. To just prove the migration itself works first,
+skip Iru and run the integration harness in
+[`../../tests/integration`](../../tests/integration/README.md).
