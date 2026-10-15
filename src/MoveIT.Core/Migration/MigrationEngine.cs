@@ -21,6 +21,8 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
 {
     private static readonly Sid WhatIfPlaceholderTarget = Sid.Parse("S-1-5-21-0-0-0-1000");
 
+    private readonly List<(string Account, string? FullName, string Password)> _generatedCredentials = [];
+
     /// <summary>Runs every pre-flight check without changing anything. Throws MigrationException listing all problems.</summary>
     public MigrationPlan Prepare(bool whatIf)
     {
@@ -40,9 +42,18 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         var errors = new List<string>();
         var warnings = new List<string>();
         var profiles = ProfileStore.GetProfiles(includeSystem: false);
-        var planned = new List<PlannedProfile>();
 
-        foreach (var mapping in config.Profiles)
+        var effective = BuildEffectiveMappings(profiles, warnings);
+        if (effective.Count == 0)
+        {
+            throw new MigrationException(config.MigrateAllEntraProfiles
+                ? "No Entra ID profiles were found to migrate. Run 'moveit list' to see the profiles on this computer."
+                : "There are no profile mappings to process.");
+        }
+        errors.AddRange(MigrationConfig.ValidateMappings(effective, Environment.MachineName, targetsMayBeBlank: false));
+
+        var planned = new List<PlannedProfile>();
+        foreach (var mapping in effective)
         {
             if (PlanProfile(mapping, profiles, whatIf, errors, warnings) is { } profile)
             {
@@ -79,6 +90,10 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
     public MigrationReport Execute(MigrationPlan plan, bool whatIf)
     {
         var results = plan.Profiles.Select(profile => whatIf ? Simulate(profile) : Migrate(profile)).ToList();
+        if (!whatIf)
+        {
+            WriteGeneratedCredentials();
+        }
         bool allSucceeded = results.All(r => r.Succeeded);
         bool leftEntra = false, entraFailed = false, rebootScheduled = false;
 
@@ -125,6 +140,91 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
 
         return new MigrationReport(results, leftEntra, entraFailed, rebootScheduled);
     }
+
+    /// <summary>Merges explicit mappings with any discovered Entra profiles and fills in blank target names.</summary>
+    private List<ProfileMapping> BuildEffectiveMappings(IReadOnlyList<ProfileEntry> profiles, List<string> warnings)
+    {
+        var effective = config.Profiles.Select(Clone).ToList();
+
+        var covered = new HashSet<Sid>();
+        foreach (var mapping in effective)
+        {
+            if (ProfileResolver.Resolve(mapping.Source, profiles, out _) is { } resolved)
+            {
+                covered.Add(resolved.Sid);
+            }
+        }
+
+        if (config.MigrateAllEntraProfiles)
+        {
+            var excluded = ResolveExclusions(profiles, warnings);
+            foreach (var profile in profiles.Where(p => p.Kind == SidKind.Entra && !p.IsBackupEntry))
+            {
+                if (covered.Add(profile.Sid) && !excluded.Contains(profile.Sid))
+                {
+                    effective.Add(new ProfileMapping { Source = profile.Sid.Value, Target = "", CreateTarget = true });
+                }
+            }
+        }
+
+        FillBlankTargets(effective, profiles);
+        return effective;
+    }
+
+    private HashSet<Sid> ResolveExclusions(IReadOnlyList<ProfileEntry> profiles, List<string> warnings)
+    {
+        var excluded = new HashSet<Sid>();
+        foreach (var spec in config.ExcludeSources)
+        {
+            if (ProfileResolver.Resolve(spec, profiles, out _) is { } resolved)
+            {
+                excluded.Add(resolved.Sid);
+            }
+            else
+            {
+                warnings.Add($"Exclusion '{spec}' did not match any profile and was ignored.");
+            }
+        }
+        return excluded;
+    }
+
+    private void FillBlankTargets(List<ProfileMapping> mappings, IReadOnlyList<ProfileEntry> profiles)
+    {
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var mapping in mappings)
+        {
+            if (!string.IsNullOrWhiteSpace(mapping.Target)
+                && LocalAccountName.TryNormalize(mapping.Target, Environment.MachineName, out var normalized, out _))
+            {
+                reserved.Add(normalized);
+            }
+        }
+
+        var generator = new TargetNameGenerator(config.Naming, name => reserved.Contains(name) || LocalAccounts.Exists(name));
+        foreach (var mapping in mappings)
+        {
+            if (!string.IsNullOrWhiteSpace(mapping.Target) || ProfileResolver.Resolve(mapping.Source, profiles, out _) is not { } source)
+            {
+                continue;
+            }
+
+            mapping.Target = generator.Generate(source);
+            reserved.Add(mapping.Target);
+        }
+    }
+
+    private static ProfileMapping Clone(ProfileMapping mapping) => new()
+    {
+        Source = mapping.Source,
+        Target = mapping.Target,
+        CreateTarget = mapping.CreateTarget,
+        FullName = mapping.FullName,
+        Password = mapping.Password,
+        PasswordEnv = mapping.PasswordEnv,
+        MakeAdmin = mapping.MakeAdmin,
+        MustChangePassword = mapping.MustChangePassword,
+        OverwriteTargetProfile = mapping.OverwriteTargetProfile,
+    };
 
     private PlannedProfile? PlanProfile(ProfileMapping mapping, IReadOnlyList<ProfileEntry> profiles, bool whatIf, List<string> errors, List<string> warnings)
     {
@@ -199,18 +299,21 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         }
 
         string? password = null;
+        bool passwordGenerated = false;
         if (targetSid is null && mapping.CreateTarget && !whatIf && errors.Count == errorsBefore)
         {
-            password = ResolvePassword(mapping, targetName, label, errors, warnings);
+            password = ResolvePassword(mapping, targetName, label, errors, warnings, out passwordGenerated);
         }
 
         return errors.Count == errorsBefore
-            ? new PlannedProfile(mapping, source, targetName, targetSid, targetProfile, password)
+            ? new PlannedProfile(mapping, source, targetName, targetSid, targetProfile, password, passwordGenerated)
             : null;
     }
 
-    private string? ResolvePassword(ProfileMapping mapping, string targetName, string label, List<string> errors, List<string> warnings)
+    private string? ResolvePassword(ProfileMapping mapping, string targetName, string label, List<string> errors, List<string> warnings, out bool generated)
     {
+        generated = false;
+
         if (!string.IsNullOrEmpty(mapping.Password))
         {
             warnings.Add($"{label}: the password is stored in plain text in the config file. Prefer passwordEnv.");
@@ -227,10 +330,16 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
             return value;
         }
 
+        if (config.GeneratePasswords)
+        {
+            generated = true;
+            return PasswordGenerator.Generate(config.GeneratedPasswordLength);
+        }
+
         var prompted = passwordPrompt?.Invoke(targetName);
         if (string.IsNullOrEmpty(prompted))
         {
-            errors.Add($"{label}: no password was provided for the new account '{targetName}'. Use --password-env (or \"passwordEnv\") or run interactively.");
+            errors.Add($"{label}: no password was provided for the new account '{targetName}'. Use --password-env, --generate-passwords, or run interactively.");
         }
         return prompted;
     }
@@ -420,6 +529,11 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
             backup.Manifest.TargetSid = target.Value;
             backup.MarkStep(MigrationSteps.AccountCreated);
             log.Success($"Created local account '{profile.TargetName}' ({target}).");
+
+            if (profile.PasswordGenerated)
+            {
+                _generatedCredentials.Add((profile.TargetName, mapping.FullName, profile.Password!));
+            }
         }
 
         if (mapping.MakeAdmin)
@@ -444,6 +558,43 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
 
         return target;
     }
+
+    private void WriteGeneratedCredentials()
+    {
+        if (_generatedCredentials.Count == 0)
+        {
+            return;
+        }
+
+        var path = config.CredentialsOutputPath
+            ?? Path.Combine(
+                AppDirectories.Ensure(config.BackupRoot ?? AppDirectories.DefaultBackups),
+                $"credentials-{DateTime.Now:yyyyMMdd-HHmmss}.csv");
+
+        try
+        {
+            if (Path.GetDirectoryName(Path.GetFullPath(path)) is { Length: > 0 } directory)
+            {
+                AppDirectories.Ensure(directory);
+            }
+
+            using var writer = new StreamWriter(path, append: false);
+            writer.WriteLine("computer,account,fullName,password");
+            foreach (var credential in _generatedCredentials)
+            {
+                writer.WriteLine(string.Join(',', new[] { Environment.MachineName, credential.Account, credential.FullName ?? "", credential.Password }.Select(CsvField)));
+            }
+
+            log.Warn($"Wrote {_generatedCredentials.Count} generated password(s) to {path}. Store this file securely and delete it once the passwords have been handed out.");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            log.Error($"Accounts were created, but the generated passwords could not be written to {path}: {e.Message}");
+        }
+    }
+
+    private static string CsvField(string value) =>
+        value.AsSpan().IndexOfAny(",\"\n\r") >= 0 ? $"\"{value.Replace("\"", "\"\"")}\"" : value;
 
     private AclMigrationStats UpdateHives(string profilePath, Sid source, Sid target, AclMode mode, bool dryRun)
     {

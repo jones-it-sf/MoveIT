@@ -21,8 +21,8 @@ internal static class CommandLine
     {
         ["list"] = new(["all"], []),
         ["migrate"] = new(
-            ["create", "admin", "must-change-password", "overwrite-target-profile", "leave-entra", "reboot", "what-if", "force", "yes", "verbose"],
-            ["source", "target", "full-name", "password-env", "acl-mode", "config", "log", "backup-root"]),
+            ["create", "admin", "must-change-password", "overwrite-target-profile", "leave-entra", "reboot", "what-if", "force", "yes", "verbose", "all", "generate-passwords"],
+            ["source", "target", "full-name", "password-env", "acl-mode", "config", "log", "backup-root", "map", "exclude", "name-prefix", "credentials-out"]),
         ["rollback"] = new(["delete-created-account", "yes", "verbose"], ["backup", "log"]),
         ["sid"] = new([], ["object-id", "sid"]),
         ["help"] = new([], []),

@@ -8,6 +8,8 @@ internal static class HelpText
         USAGE
           moveit list [--all]
           moveit migrate --source <who> --target <local user> [options]
+          moveit migrate --all [--generate-passwords] [options]
+          moveit migrate --map <file.csv> [options]
           moveit migrate --config <file.json> [--what-if] [--yes] [--verbose] [--log <file>]
           moveit rollback --backup <folder> [--delete-created-account] [--yes]
           moveit sid --object-id <Entra object ID>  |  moveit sid --sid <S-1-12-1-...>
@@ -21,6 +23,16 @@ internal static class HelpText
           --source <who>              Profile to move. Any of: AzureAD\JohnSmith, JohnSmith,
                                       a SID, an Entra object ID, or a path like C:\Users\JohnSmith.
           --target <local user>       Local account that takes over the profile: jsmith or .\jsmith.
+                                      Leave it off with --all or --map to auto-generate the name.
+          --all                       Migrate every Entra ID profile on the machine. Names are
+                                      generated; use --generate-passwords to set passwords.
+          --map <file.csv>            Read mappings from a CSV (columns: source, target, fullName,
+                                      admin, mustChangePassword, passwordEnv). Blank target = generated.
+          --exclude <a,b,...>         With --all, skip these sources (SID, name, object ID or path).
+          --name-prefix <text>        Prefix for generated account names, for example "loc-".
+          --generate-passwords        Give each new account a strong random password and write them
+                                      to a credentials CSV (secured, under the backup root).
+          --credentials-out <file>    Where to write generated passwords.
           --create                    Create the local account if it does not exist.
           --password-env <VAR>        Read the new account's password from an environment variable.
                                       Without it you are prompted (interactive sessions only).
@@ -47,6 +59,8 @@ internal static class HelpText
         EXAMPLES
           moveit migrate --source AzureAD\JohnSmith --target jsmith --create --admin --what-if
           moveit migrate --source AzureAD\JohnSmith --target jsmith --create --password-env PW --leave-entra --yes
+          moveit migrate --all --generate-passwords --leave-entra --reboot --yes
+          moveit migrate --map C:\MoveIT\users.csv --generate-passwords --yes
           moveit migrate --config C:\MoveIT\entra-to-local.json --yes
 
         EXIT CODES

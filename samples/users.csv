@@ -1,0 +1,4 @@
+source,target,fullName,admin,mustChangePassword,passwordEnv
+AzureAD\JohnSmith,jsmith,John Smith,yes,no,
+AzureAD\JaneDoe,,Jane Doe,no,yes,
+AzureAD\bob@contoso.com,bob,Bob Jones,no,no,MOVEIT_PW_BOB

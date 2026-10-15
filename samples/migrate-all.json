@@ -1,0 +1,30 @@
+// Migrate every Entra ID profile on the machine to a new local account, then leave Entra ID.
+// Names are generated from each account; each new account gets a strong random password
+// written to a secured credentials CSV under the backup root.
+//   moveit migrate --config migrate-all.json --what-if
+//   moveit migrate --config migrate-all.json --yes
+{
+  "migrateAllEntraProfiles": true,
+  "generatePasswords": true,
+  "generatedPasswordLength": 20,
+
+  "naming": {
+    // Auto = account name when known, else the profile folder name. Also: AccountName, FolderName.
+    "basis": "Auto",
+    "lowercase": true,
+    "prefix": ""
+  },
+
+  // Skip these accounts during discovery (SID, name, Entra object ID or profile path).
+  "excludeSources": [
+    "AzureAD\\admin@contoso.com"
+  ],
+
+  "aclMode": "add",
+  "leaveEntra": true,
+  "reboot": true,
+
+  // One enabled local admin must remain after leaving Entra. Either make one of the
+  // migrated users an admin (per-profile "makeAdmin"), enable a local admin first, or set force.
+  "force": false
+}

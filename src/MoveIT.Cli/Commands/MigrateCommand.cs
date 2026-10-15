@@ -80,7 +80,7 @@ internal static class MigrateCommand
         return log.WarningCount > 0 ? ExitCodes.CompletedWithWarnings : ExitCodes.Success;
     }
 
-    private static MigrationConfig BuildConfig(ParsedCommand command)
+    internal static MigrationConfig BuildConfig(ParsedCommand command)
     {
         if (command.Get("config") is { } configPath)
         {
@@ -92,8 +92,6 @@ internal static class MigrateCommand
             return MigrationConfigLoader.Load(configPath);
         }
 
-        var source = command.Get("source") ?? throw new CommandLineException("--source is required (or use --config).");
-        var target = command.Get("target") ?? throw new CommandLineException("--target is required (or use --config).");
         var aclMode = command.Get("acl-mode")?.ToLowerInvariant() switch
         {
             null or "add" => AclMode.Add,
@@ -101,29 +99,57 @@ internal static class MigrateCommand
             var other => throw new CommandLineException($"--acl-mode must be 'add' or 'replace', not '{other}'."),
         };
 
+        bool migrateAll = command.Has("all");
+        var mapFile = command.Get("map");
+        var profiles = new List<ProfileMapping>();
+
+        if (mapFile is not null)
+        {
+            profiles.AddRange(MappingCsv.Load(mapFile));
+        }
+
+        if (command.Get("source") is { } source)
+        {
+            profiles.Add(new ProfileMapping
+            {
+                Source = source,
+                Target = command.Get("target") ?? "",
+                CreateTarget = command.Has("create"),
+                FullName = command.Get("full-name"),
+                PasswordEnv = command.Get("password-env"),
+                MakeAdmin = command.Has("admin"),
+                MustChangePassword = command.Has("must-change-password"),
+                OverwriteTargetProfile = command.Has("overwrite-target-profile"),
+            });
+        }
+        else if (command.Has("target"))
+        {
+            throw new CommandLineException("--target was given without --source.");
+        }
+
+        if (profiles.Count == 0 && !migrateAll)
+        {
+            throw new CommandLineException("Specify what to migrate with --source, --map <file.csv>, --all, or --config.");
+        }
+
         return new MigrationConfig
         {
-            Profiles =
-            [
-                new ProfileMapping
-                {
-                    Source = source,
-                    Target = target,
-                    CreateTarget = command.Has("create"),
-                    FullName = command.Get("full-name"),
-                    PasswordEnv = command.Get("password-env"),
-                    MakeAdmin = command.Has("admin"),
-                    MustChangePassword = command.Has("must-change-password"),
-                    OverwriteTargetProfile = command.Has("overwrite-target-profile"),
-                },
-            ],
+            Profiles = profiles,
             AclMode = aclMode,
+            MigrateAllEntraProfiles = migrateAll,
+            ExcludeSources = SplitList(command.Get("exclude")),
+            Naming = new NamingOptions { Prefix = command.Get("name-prefix") ?? "" },
+            GeneratePasswords = command.Has("generate-passwords"),
+            CredentialsOutputPath = command.Get("credentials-out"),
             LeaveEntra = command.Has("leave-entra"),
             Reboot = command.Has("reboot"),
             BackupRoot = command.Get("backup-root"),
             Force = command.Has("force"),
         };
     }
+
+    private static List<string> SplitList(string? value) =>
+        value is null ? [] : [.. value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)];
 
     private static void PrintPlan(MigrationPlan plan, MigrationConfig config, Logger log)
     {
