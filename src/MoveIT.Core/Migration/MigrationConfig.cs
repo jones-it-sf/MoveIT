@@ -20,20 +20,54 @@ public sealed class MigrationConfig
     /// <summary>Lets the Entra leave step run even when no enabled local administrator would remain.</summary>
     public bool Force { get; set; }
 
+    /// <summary>Discover and migrate every Entra ID profile on the machine, in addition to any listed in Profiles.</summary>
+    public bool MigrateAllEntraProfiles { get; set; }
+
+    /// <summary>Sources to skip during discovery: SID, account name, Entra object ID or profile path.</summary>
+    public List<string> ExcludeSources { get; set; } = [];
+
+    /// <summary>How to invent a local account name when a mapping leaves 'target' blank.</summary>
+    public NamingOptions Naming { get; set; } = new();
+
+    /// <summary>Create new accounts with a strong random password and write them to a credentials file.</summary>
+    public bool GeneratePasswords { get; set; }
+
+    public int GeneratedPasswordLength { get; set; } = 20;
+
+    /// <summary>Where to write generated passwords. Defaults to a secured file under the backup root.</summary>
+    public string? CredentialsOutputPath { get; set; }
+
+    /// <summary>Validates the configuration as written. Blank targets are allowed only when they will be generated.</summary>
     public IReadOnlyList<string> Validate(string machineName)
     {
         var errors = new List<string>();
-        if (Profiles.Count == 0)
+        if (Profiles.Count == 0 && !MigrateAllEntraProfiles)
         {
-            errors.Add("At least one profile mapping is required.");
+            errors.Add("At least one profile mapping is required (or enable migrateAllEntraProfiles).");
         }
 
+        if (GeneratedPasswordLength is < 12 or > 127)
+        {
+            errors.Add("generatedPasswordLength must be between 12 and 127.");
+        }
+
+        errors.AddRange(ValidateMappings(Profiles, machineName, targetsMayBeBlank: true));
+        return errors;
+    }
+
+    /// <summary>
+    /// Validates a resolved mapping list, after any blank targets have been filled in. Used by the engine
+    /// on the effective set of mappings (explicit + CSV + discovered).
+    /// </summary>
+    public static IReadOnlyList<string> ValidateMappings(IReadOnlyList<ProfileMapping> mappings, string machineName, bool targetsMayBeBlank)
+    {
+        var errors = new List<string>();
         var sources = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var targets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        for (int i = 0; i < Profiles.Count; i++)
+        for (int i = 0; i < mappings.Count; i++)
         {
-            var mapping = Profiles[i];
+            var mapping = mappings[i];
             var label = $"profiles[{i}]";
 
             if (string.IsNullOrWhiteSpace(mapping.Source))
@@ -47,7 +81,10 @@ public sealed class MigrationConfig
 
             if (string.IsNullOrWhiteSpace(mapping.Target))
             {
-                errors.Add($"{label}: 'target' is required.");
+                if (!targetsMayBeBlank)
+                {
+                    errors.Add($"{label}: 'target' is required.");
+                }
             }
             else if (!LocalAccountName.TryNormalize(mapping.Target, machineName, out var targetName, out var nameError))
             {
