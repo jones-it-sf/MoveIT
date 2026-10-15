@@ -1,0 +1,29 @@
+// MoveIT config: move Entra ID profiles to local accounts, then leave Entra ID.
+// Run: moveit migrate --config entra-to-local.json --what-if   (check first)
+//      moveit migrate --config entra-to-local.json --yes
+{
+  "profiles": [
+    {
+      // Any of: "AzureAD\\JohnSmith", "JohnSmith", a SID, the Entra object ID, or "C:\\Users\\JohnSmith"
+      "source": "AzureAD\\JohnSmith",
+      "target": "jsmith",
+      "createTarget": true,
+      "fullName": "John Smith",
+      // Set this variable in your RMM script so the password is not stored in the file.
+      "passwordEnv": "MOVEIT_PASSWORD_JSMITH",
+      "makeAdmin": true,
+      "mustChangePassword": true
+    },
+    {
+      "source": "AzureAD\\JaneDoe",
+      "target": "jdoe",
+      "createTarget": true,
+      "passwordEnv": "MOVEIT_PASSWORD_JDOE"
+    }
+  ],
+
+  // "add" keeps the old account's permissions (safest). "replace" removes them after the profile is moved.
+  "aclMode": "add",
+  "leaveEntra": true,
+  "reboot": false
+}
