@@ -51,6 +51,7 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
                 : "There are no profile mappings to process.");
         }
         errors.AddRange(MigrationConfig.ValidateMappings(effective, Environment.MachineName, targetsMayBeBlank: false));
+        ValidateScripts(errors);
 
         var planned = new List<PlannedProfile>();
         foreach (var mapping in effective)
@@ -96,6 +97,18 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         }
         bool allSucceeded = results.All(r => r.Succeeded);
         bool leftEntra = false, entraFailed = false, rebootScheduled = false;
+
+        if (config.Scripts.AfterAll is not null)
+        {
+            if (whatIf)
+            {
+                log.Info($"[what-if] Would run the after-all script: {config.Scripts.AfterAll}");
+            }
+            else
+            {
+                RunAfterAllScript(new MigrationReport(results, false, false, false));
+            }
+        }
 
         if (plan.LeaveEntra)
         {
@@ -213,6 +226,37 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         }
     }
 
+    private void ValidateScripts(List<string> errors)
+    {
+        if (config.Scripts.TimeoutMinutes <= 0)
+        {
+            errors.Add("scripts.timeoutMinutes must be greater than zero.");
+        }
+
+        foreach (var (label, path) in new[] { ("scripts.afterEach", config.Scripts.AfterEach), ("scripts.afterAll", config.Scripts.AfterAll) })
+        {
+            if (path is null)
+            {
+                continue;
+            }
+
+            if (!File.Exists(path))
+            {
+                errors.Add($"{label}: the script '{path}' does not exist.");
+                continue;
+            }
+
+            try
+            {
+                _ = ScriptCommand.For(path);
+            }
+            catch (ArgumentException e)
+            {
+                errors.Add($"{label}: {e.Message}");
+            }
+        }
+    }
+
     private static ProfileMapping Clone(ProfileMapping mapping) => new()
     {
         Source = mapping.Source,
@@ -224,6 +268,8 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         MakeAdmin = mapping.MakeAdmin,
         MustChangePassword = mapping.MustChangePassword,
         OverwriteTargetProfile = mapping.OverwriteTargetProfile,
+        DisableSource = mapping.DisableSource,
+        DeleteSource = mapping.DeleteSource,
     };
 
     private PlannedProfile? PlanProfile(ProfileMapping mapping, IReadOnlyList<ProfileEntry> profiles, bool whatIf, List<string> errors, List<string> warnings)
@@ -493,8 +539,11 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
                 RemoveSourceAccess(profile, target, backup);
             }
 
+            ApplySourceCleanup(profile, backup);
+
             backup.Manifest.CompletedAt = DateTimeOffset.Now;
             backup.Save();
+            RunAfterEachScript(profile);
             return new ProfileResult(source.DisplayName, profile.TargetName, true, backup.Directory, files, registry, null);
         }
         catch (Exception e)
@@ -557,6 +606,104 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         }
 
         return target;
+    }
+
+    private void ApplySourceCleanup(PlannedProfile profile, BackupSession backup)
+    {
+        var mapping = profile.Mapping;
+        if (!mapping.DisableSource && !mapping.DeleteSource)
+        {
+            return;
+        }
+
+        var source = profile.Source;
+        if (source.Kind != SidKind.Local)
+        {
+            log.Warn($"{source.DisplayName} is not a local account, so it cannot be disabled or deleted. Skipping source cleanup for this profile.");
+            return;
+        }
+
+        var name = SamName(source.AccountName);
+        if (name is null)
+        {
+            log.Warn($"Could not determine the account name for {source.DisplayName}; skipping source cleanup.");
+            return;
+        }
+
+        if (mapping.DeleteSource)
+        {
+            LocalAccounts.Delete(name);
+            backup.Manifest.SourceDeleted = true;
+            backup.Save();
+            log.Info($"Deleted the source local account '{name}'. Rollback cannot recreate it.");
+        }
+        else
+        {
+            LocalAccounts.SetEnabled(name, enabled: false);
+            backup.Manifest.SourceDisabled = true;
+            backup.Save();
+            log.Info($"Disabled the source local account '{name}'.");
+        }
+    }
+
+    private void RunAfterEachScript(PlannedProfile profile)
+    {
+        if (config.Scripts.AfterEach is not { } script)
+        {
+            return;
+        }
+
+        var environment = new Dictionary<string, string>
+        {
+            ["MOVEIT_COMPUTER"] = Environment.MachineName,
+            ["MOVEIT_TARGET"] = profile.TargetName,
+            ["MOVEIT_SOURCE"] = profile.Source.DisplayName,
+            ["MOVEIT_SOURCE_SID"] = profile.Source.Sid.Value,
+            ["MOVEIT_PROFILE_PATH"] = profile.Source.ProfileImagePath,
+        };
+
+        try
+        {
+            ScriptRunner.Run(script, "after-each", environment, TimeSpan.FromMinutes(config.Scripts.TimeoutMinutes), log);
+        }
+        catch (Exception e) when (e is TimeoutException or InvalidOperationException or IOException)
+        {
+            log.Warn($"The after-each script did not run cleanly: {e.Message}");
+        }
+    }
+
+    private void RunAfterAllScript(MigrationReport report)
+    {
+        if (config.Scripts.AfterAll is not { } script)
+        {
+            return;
+        }
+
+        var environment = new Dictionary<string, string>
+        {
+            ["MOVEIT_COMPUTER"] = Environment.MachineName,
+            ["MOVEIT_RESULT"] = report.Succeeded ? "success" : "partial",
+            ["MOVEIT_MIGRATED"] = report.Profiles.Count(p => p.Succeeded).ToString(),
+        };
+
+        try
+        {
+            ScriptRunner.Run(script, "after-all", environment, TimeSpan.FromMinutes(config.Scripts.TimeoutMinutes), log);
+        }
+        catch (Exception e) when (e is TimeoutException or InvalidOperationException or IOException)
+        {
+            log.Warn($"The after-all script did not run cleanly: {e.Message}");
+        }
+    }
+
+    private static string? SamName(string? accountName)
+    {
+        if (string.IsNullOrWhiteSpace(accountName))
+        {
+            return null;
+        }
+        int backslash = accountName.IndexOf('\\');
+        return backslash >= 0 ? accountName[(backslash + 1)..] : accountName;
     }
 
     private void WriteGeneratedCredentials()

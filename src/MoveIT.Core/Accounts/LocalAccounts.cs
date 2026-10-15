@@ -87,6 +87,33 @@ public static class LocalAccounts
         }
     }
 
+    public static void SetEnabled(string name, bool enabled)
+    {
+        int rc = NetUserGetInfo(null, name, 1, out var buffer);
+        if (rc != ERROR_SUCCESS)
+        {
+            throw new MigrationException($"Could not read local account '{name}': {Describe(rc)}");
+        }
+
+        uint flags;
+        try
+        {
+            flags = Marshal.PtrToStructure<USER_INFO_1>(buffer).usri1_flags;
+        }
+        finally
+        {
+            NetApiBufferFree(buffer);
+        }
+
+        flags = enabled ? flags & ~UF_ACCOUNTDISABLE : flags | UF_ACCOUNTDISABLE;
+        var update = new USER_INFO_1008 { usri1008_flags = flags };
+        rc = NetUserSetFlags(null, name, 1008, ref update, out _);
+        if (rc != ERROR_SUCCESS)
+        {
+            throw new MigrationException($"Could not {(enabled ? "enable" : "disable")} local account '{name}': {Describe(rc)}");
+        }
+    }
+
     /// <summary>Returns false if the account was already a member.</summary>
     public static bool AddToAdministrators(Sid user)
     {

@@ -42,6 +42,11 @@ internal static class HelpText
           --overwrite-target-profile  Replace the target's existing profile registration.
           --acl-mode add|replace      add (default): the old account keeps its permissions.
                                       replace: remove them after the profile is reassigned.
+          --disable-source            Disable the source account afterwards (local accounts only).
+          --delete-source             Delete the source account afterwards (local accounts only).
+          --after-each <script>       Run a .ps1/.cmd/.bat/.exe after each profile. It gets MOVEIT_*
+                                      environment variables (MOVEIT_TARGET, MOVEIT_PROFILE_PATH, ...).
+          --after-all <script>        Run a script once after all profiles, before leaving Entra ID.
           --leave-entra               Remove the device from Entra ID after all profiles succeed.
           --reboot                    Restart 60 seconds after a successful migration.
           --force                     Allow --leave-entra with no enabled local administrator left.

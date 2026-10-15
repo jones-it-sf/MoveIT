@@ -33,6 +33,10 @@ public sealed class MigrationManifest
 
     public bool TargetProfileEntryReplaced { get; set; }
 
+    public bool SourceDisabled { get; set; }
+
+    public bool SourceDeleted { get; set; }
+
     public AclMode AclMode { get; set; }
 
     public List<string> CompletedSteps { get; set; } = [];

@@ -120,6 +120,8 @@ internal static class MigrateCommand
                 MakeAdmin = command.Has("admin"),
                 MustChangePassword = command.Has("must-change-password"),
                 OverwriteTargetProfile = command.Has("overwrite-target-profile"),
+                DisableSource = command.Has("disable-source"),
+                DeleteSource = command.Has("delete-source"),
             });
         }
         else if (command.Has("target"))
@@ -141,6 +143,11 @@ internal static class MigrateCommand
             Naming = new NamingOptions { Prefix = command.Get("name-prefix") ?? "" },
             GeneratePasswords = command.Has("generate-passwords"),
             CredentialsOutputPath = command.Get("credentials-out"),
+            Scripts = new ScriptHooks
+            {
+                AfterEach = command.Get("after-each"),
+                AfterAll = command.Get("after-all"),
+            },
             LeaveEntra = command.Has("leave-entra"),
             Reboot = command.Has("reboot"),
             BackupRoot = command.Get("backup-root"),

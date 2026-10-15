@@ -90,6 +90,12 @@ internal static class NativeMethods
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct USER_INFO_1008
+    {
+        public uint usri1008_flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct LOCALGROUP_MEMBERS_INFO_0
     {
         public IntPtr lgrmi0_sid;
@@ -240,6 +246,9 @@ internal static class NativeMethods
 
     [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
     internal static extern int NetUserSetInfo(string? serverName, string userName, uint level, ref USER_INFO_1011 buffer, out uint parameterError);
+
+    [DllImport("netapi32.dll", EntryPoint = "NetUserSetInfo", CharSet = CharSet.Unicode)]
+    internal static extern int NetUserSetFlags(string? serverName, string userName, uint level, ref USER_INFO_1008 buffer, out uint parameterError);
 
     [DllImport("netapi32.dll", CharSet = CharSet.Unicode)]
     internal static extern int NetLocalGroupAddMembers(string? serverName, string groupName, uint level, ref LOCALGROUP_MEMBERS_INFO_0 buffer, uint totalEntries);

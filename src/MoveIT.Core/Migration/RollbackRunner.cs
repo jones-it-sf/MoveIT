@@ -80,6 +80,17 @@ public static class RollbackRunner
             }
         }
 
+        if (manifest.SourceDeleted)
+        {
+            log.Warn($"The source account {sourceName} was deleted during the migration and cannot be recreated by rollback.");
+        }
+        else if (manifest.SourceDisabled && manifest.SourceAccount is { } sourceAccount)
+        {
+            var sam = sourceAccount.Contains('\\') ? sourceAccount[(sourceAccount.IndexOf('\\') + 1)..] : sourceAccount;
+            LocalAccounts.SetEnabled(sam, enabled: true);
+            log.Info($"Re-enabled the source local account '{sam}'.");
+        }
+
         if (manifest.TargetAddedToAdministrators && target is not null)
         {
             LocalAccounts.RemoveFromAdministrators(target);

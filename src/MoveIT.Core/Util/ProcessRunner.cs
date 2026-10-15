@@ -6,7 +6,11 @@ public sealed record ProcessResult(int ExitCode, string Output);
 
 public static class ProcessRunner
 {
-    public static ProcessResult Run(string fileName, IEnumerable<string> arguments, TimeSpan timeout)
+    public static ProcessResult Run(
+        string fileName,
+        IEnumerable<string> arguments,
+        TimeSpan timeout,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -18,6 +22,14 @@ public static class ProcessRunner
         foreach (var argument in arguments)
         {
             startInfo.ArgumentList.Add(argument);
+        }
+
+        if (environment is not null)
+        {
+            foreach (var (key, value) in environment)
+            {
+                startInfo.Environment[key] = value;
+            }
         }
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start {fileName}.");

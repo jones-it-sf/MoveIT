@@ -37,6 +37,9 @@ public sealed class MigrationConfig
     /// <summary>Where to write generated passwords. Defaults to a secured file under the backup root.</summary>
     public string? CredentialsOutputPath { get; set; }
 
+    /// <summary>Scripts MoveIT runs during the migration. They run in the elevated/SYSTEM context of MoveIT.</summary>
+    public ScriptHooks Scripts { get; set; } = new();
+
     /// <summary>Validates the configuration as written. Blank targets are allowed only when they will be generated.</summary>
     public IReadOnlyList<string> Validate(string machineName)
     {
@@ -104,6 +107,11 @@ public sealed class MigrationConfig
             {
                 errors.Add($"{label}: a password is only used when 'createTarget' is true.");
             }
+
+            if (mapping.DisableSource && mapping.DeleteSource)
+            {
+                errors.Add($"{label}: set either 'disableSource' or 'deleteSource', not both.");
+            }
         }
 
         return errors;
@@ -132,4 +140,21 @@ public sealed class ProfileMapping
 
     /// <summary>Replace the target's existing profile registration. Its old folder stays on disk.</summary>
     public bool OverwriteTargetProfile { get; set; }
+
+    /// <summary>After a successful migration, disable the source account (only if it is a local account).</summary>
+    public bool DisableSource { get; set; }
+
+    /// <summary>After a successful migration, delete the source account (only if it is a local account). Cannot be rolled back.</summary>
+    public bool DeleteSource { get; set; }
+}
+
+public sealed class ScriptHooks
+{
+    /// <summary>Run after each profile is migrated. Receives MOVEIT_* environment variables for that profile.</summary>
+    public string? AfterEach { get; set; }
+
+    /// <summary>Run once after all profiles are migrated and before leaving Entra ID.</summary>
+    public string? AfterAll { get; set; }
+
+    public int TimeoutMinutes { get; set; } = 10;
 }
