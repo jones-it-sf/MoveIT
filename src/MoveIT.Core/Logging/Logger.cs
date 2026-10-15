@@ -32,6 +32,9 @@ public sealed class Logger : IDisposable
 
     public string? FilePath { get; }
 
+    /// <summary>Raised for every message (including debug). Used by the GUI to mirror output on screen.</summary>
+    public event Action<LogLevel, string>? MessageLogged;
+
     public int WarningCount => Volatile.Read(ref _warnings);
 
     public int ErrorCount => Volatile.Read(ref _errors);
@@ -56,6 +59,8 @@ public sealed class Logger : IDisposable
         {
             Interlocked.Increment(ref _errors);
         }
+
+        MessageLogged?.Invoke(level, message);
 
         lock (_gate)
         {
