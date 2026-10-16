@@ -41,6 +41,7 @@ directly.
 In Iru Endpoint, create a **Windows Custom App** Library Item and use these settings:
 
 - **Name:** `MoveIT Profile Migration`
+- **App icon:** upload [`moveit-app-icon.png`](moveit-app-icon.png).
 - **Installer:** upload the architecture-appropriate ZIP.
 - **Installation:** `Install once per device`.
 - **Install context:** System.
