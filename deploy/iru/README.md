@@ -37,21 +37,29 @@ That gives us exactly what in-place migration needs for free:
   fleet, host one package per architecture and assign them to separate Blueprints.
 - Scripts run at SYSTEM, which is what MoveIT needs.
 
-## 1. Build and host the package
+## 1. Cut a release (CI builds the package)
 
-Zip these three files together (zip the files, not the folder):
+The package is hosted as a **GitHub release asset**, built automatically by CI. Push a version tag
+and the workflow publishes both architecture packages and attaches them to the release:
 
-- `moveit.exe` from `dotnet publish src/MoveIT.Cli -c Release -r win-x64` (or `-r win-arm64`)
-- `Invoke-MoveItMigration.ps1` from [`../`](../)
-- `moveit.json` (your config, e.g. a copy of [`../../samples/migrate-all.json`](../../samples/migrate-all.json),
-  with `"reboot": false` so Iru owns the reboot)
-
-Record the hash and host the `.zip` somewhere the devices can reach over HTTPS (Azure Blob + SAS, S3,
-a GitHub release asset, or an internal web server):
-
-```powershell
-(Get-FileHash .\moveit-package.zip -Algorithm SHA256).Hash
+```bash
+git tag v0.1.0
+git push origin v0.1.0
 ```
+
+That produces, on the release:
+
+- `moveit-win-x64.zip` and `moveit-win-arm64.zip`, each containing `moveit.exe` and
+  `Invoke-MoveItMigration.ps1` (binary only; no config, so nothing sensitive is public),
+- `MoveIT-Wizard-win-x64.exe` and `MoveIT-Wizard-win-arm64.exe` (the GUI, for manual use).
+
+The remediation script downloads from `releases/latest/download/moveit-win-x64.zip`, so it always
+gets the newest release without editing the URL. To pin a version instead, point `$PackageUrl` at a
+specific tag URL and set `$PackageSha256` (get the hash from `Get-FileHash .\moveit-win-x64.zip
+-Algorithm SHA256`).
+
+Because the package is binary-only, the migration options live in the remediation script's
+`$ExtraArgs`, not in a bundled config.
 
 ## 2. Create the Windows Custom Script Library Item
 
@@ -61,9 +69,11 @@ Blueprint, and set:
 - **Execution Frequency:** Install once per device.
 - **Audit Script:** paste [`Audit-MoveItMigration.ps1`](Audit-MoveItMigration.ps1) as-is.
 - **Remediation Script:** paste [`Remediate-MoveItMigration.ps1`](Remediate-MoveItMigration.ps1) and
-  edit its CONFIG block (`$PackageUrl`, `$PackageSha256`, and optionally `$ExtraArgs`).
-- **Restart after a successful execution:** enable this if the migration should reboot (recommended
-  when `leaveEntra` is set). Users get a 30-minute countdown.
+  set `$ExtraArgs` to the migration you want (it defaults to
+  `@('migrate','--all','--generate-passwords')`). `$PackageUrl` already points at this repo's latest
+  release.
+- **Restart after a successful execution:** enable this if the migration should reboot (recommended if
+  you add `--leave-entra` to `$ExtraArgs`). Users get a 30-minute countdown.
 
 Each custom script has a 1-hour execution timeout, which is far more than a migration needs.
 

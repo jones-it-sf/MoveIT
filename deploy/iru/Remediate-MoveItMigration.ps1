@@ -10,8 +10,8 @@
 
       1. defers (does nothing) while an interactive user is logged on, so MoveIT never tries to
          migrate a loaded profile. Iru retries on the next check-in,
-      2. downloads a package .zip (moveit.exe + Invoke-MoveItMigration.ps1 + moveit.json) that you
-         host, verifies its hash, and extracts it,
+      2. downloads a package .zip (moveit.exe + Invoke-MoveItMigration.ps1) from a GitHub release,
+         verifies its hash, and extracts it,
       3. runs the standard wrapper, which performs the migration and writes the done marker on
          success. Once the marker exists, the audit passes and Iru stops running this.
 
@@ -30,23 +30,23 @@
 
 # ----------------------------- CONFIG (edit these) -----------------------------
 
-# URL to a .zip that contains moveit.exe, Invoke-MoveItMigration.ps1, and your moveit.json.
-# Host it anywhere the device can reach over HTTPS (Azure Blob + SAS, S3, a GitHub release
-# asset, or an internal web server). Build the exe with:
-#   dotnet publish src/MoveIT.Cli -c Release -r win-x64   (win-arm64 for ARM devices)
-$PackageUrl = 'https://example.com/moveit/moveit-package.zip'
+# URL to the release .zip (contains moveit.exe + Invoke-MoveItMigration.ps1). The CI builds this
+# on every version tag. 'releases/latest/download' always points at the newest release.
+# Use moveit-win-arm64.zip for ARM devices.
+$PackageUrl = 'https://github.com/jones-it-sf/MoveIT/releases/latest/download/moveit-win-x64.zip'
 
-# Optional SHA-256 of the .zip. Strongly recommended. Leave '' to skip verification.
-# Get it with:  (Get-FileHash .\moveit-package.zip -Algorithm SHA256).Hash
+# Optional SHA-256 of the .zip. Recommended if you pin to a specific version tag instead of 'latest'.
+# Leave '' to skip. Get it with:  (Get-FileHash .\moveit-win-x64.zip -Algorithm SHA256).Hash
 $PackageSha256 = ''
 
 # If $true, defer (exit 10) while any user is logged on. Leave $true unless you deliberately
 # want to migrate while someone may be signed in (MoveIT will refuse a loaded profile anyway).
 $DeferIfUserLoggedOn = $true
 
-# Extra arguments to moveit.exe instead of using moveit.json. Leave @() to use the config.
-# Example: @('migrate','--all','--generate-passwords','--leave-entra')
-$ExtraArgs = @()
+# The migration to run. REQUIRED: the public release is binary-only (no config is bundled), so the
+# options live here, not in a file. Add '--leave-entra' to leave Entra ID (and enable "Restart after
+# a successful execution" on the Library Item so the agent reboots the device).
+$ExtraArgs = @('migrate', '--all', '--generate-passwords')
 
 # ------------------------- end CONFIG (do not edit below) ----------------------
 

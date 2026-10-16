@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -39,3 +40,40 @@ jobs:
           path: |
             artifacts/${{ matrix.rid }}/moveit.exe
             artifacts/${{ matrix.rid }}/MoveIT-Wizard.exe
+
+  release:
+    name: Release
+    runs-on: windows-latest
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build release packages
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          foreach ($rid in 'win-x64', 'win-arm64') {
+            dotnet publish src/MoveIT.Cli -c Release -r $rid -o "stage/$rid/cli"
+            if ($LASTEXITCODE -ne 0) { throw "CLI publish failed for $rid" }
+            dotnet publish src/MoveIT.Gui -c Release -r $rid -o "stage/$rid/gui"
+            if ($LASTEXITCODE -ne 0) { throw "GUI publish failed for $rid" }
+
+            $pkg = "stage/pkg-$rid"
+            New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+            Copy-Item "stage/$rid/cli/moveit.exe" $pkg
+            Copy-Item "deploy/Invoke-MoveItMigration.ps1" $pkg
+            Compress-Archive -Path "$pkg/*" -DestinationPath "artifacts/moveit-$rid.zip" -Force
+            Copy-Item "stage/$rid/gui/MoveIT-Wizard.exe" "artifacts/MoveIT-Wizard-$rid.exe"
+          }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/moveit-win-x64.zip
+            artifacts/moveit-win-arm64.zip
+            artifacts/MoveIT-Wizard-win-x64.exe
+            artifacts/MoveIT-Wizard-win-arm64.exe
