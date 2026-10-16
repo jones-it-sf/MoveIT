@@ -68,6 +68,13 @@ jobs:
             Copy-Item "stage/$rid/cli/moveit.exe" $pkg
             Copy-Item "deploy/Invoke-MoveItMigration.ps1" $pkg
             Compress-Archive -Path "$pkg/*" -DestinationPath "artifacts/moveit-$rid.zip" -Force
+
+            $iruPkg = "stage/iru-custom-app-$rid"
+            New-Item -ItemType Directory -Force -Path $iruPkg | Out-Null
+            Copy-Item "stage/$rid/cli/moveit.exe" $iruPkg
+            Copy-Item "deploy/iru/Install-MoveItCustomApp.ps1" $iruPkg
+            Compress-Archive -Path "$iruPkg/*" -DestinationPath "artifacts/moveit-iru-custom-app-$rid.zip" -Force
+
             Copy-Item "stage/$rid/gui/MoveIT-Wizard.exe" "artifacts/MoveIT-Wizard-$rid.exe"
           }
       - uses: softprops/action-gh-release@v2
@@ -75,5 +82,7 @@ jobs:
           files: |
             artifacts/moveit-win-x64.zip
             artifacts/moveit-win-arm64.zip
+            artifacts/moveit-iru-custom-app-win-x64.zip
+            artifacts/moveit-iru-custom-app-win-arm64.zip
             artifacts/MoveIT-Wizard-win-x64.exe
             artifacts/MoveIT-Wizard-win-arm64.exe

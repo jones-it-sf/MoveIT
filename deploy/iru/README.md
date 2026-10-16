@@ -1,11 +1,13 @@
 # Deploying MoveIT with Iru (formerly Kandji)
 
-Iru added Windows management (Iru Endpoint), using Microsoft's MDM framework plus the **Iru Agent**.
-The agent runs PowerShell on Windows through a **Custom Script Library Item** that uses an
-**audit + remediation** model, and MoveIT plugs straight into it. The agent, not our script, handles
-the retry loop, the SYSTEM context, status reporting, and the post-migration reboot.
+For production, use the **Windows Custom App** deployment in
+[`CUSTOM-APP.md`](CUSTOM-APP.md). It uses Iru's native app-enforcement alert, Update now button,
+deferrals, and deadline countdown before logging users off and migrating their profiles.
 
-## Why the audit/remediation model fits
+The audit/remediation **Custom Script** method below remains available for unattended maintenance
+windows and testing. Windows Custom Scripts do not expose Iru's interactive app-enforcement UI.
+
+## Alternative: audit/remediation Custom Script
 
 A Windows Custom Script Library Item has two scripts and an execution frequency:
 
@@ -51,6 +53,8 @@ That produces, on the release:
 
 - `moveit-win-x64.zip` and `moveit-win-arm64.zip`, each containing `moveit.exe` and
   `Invoke-MoveItMigration.ps1` (binary only; no config, so nothing sensitive is public),
+- `moveit-iru-custom-app-win-x64.zip` and `moveit-iru-custom-app-win-arm64.zip`, ready to upload as
+  Iru Windows Custom Apps,
 - `MoveIT-Wizard-win-x64.exe` and `MoveIT-Wizard-win-arm64.exe` (the GUI, for manual use).
 
 The remediation script downloads from `releases/latest/download/moveit-win-x64.zip`, so it always
