@@ -72,6 +72,31 @@ public static class ProfileStore
         return key is not null;
     }
 
+    /// <summary>
+    /// Verifies that Windows is not holding a profile hive open. This catches loaded profiles that
+    /// are not visible under the expected HKEY_USERS SID, including stale or unusual Entra sessions.
+    /// </summary>
+    public static bool IsHiveInUse(string hivePath)
+    {
+        try
+        {
+            using var stream = new FileStream(
+                hivePath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None);
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
+        }
+    }
+
     public static bool ProfileGuidExists(Guid guid)
     {
         using var hklm = OpenLocalMachine();

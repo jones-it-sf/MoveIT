@@ -302,6 +302,15 @@ public sealed class MigrationEngine(MigrationConfig config, Logger log, Func<str
         {
             errors.Add($"{label}: {source.ProfileImagePath} has no NTUSER.DAT, so it is not a complete profile.");
         }
+        else
+        {
+            string? lockedHive = ProfileStore.GetHivePaths(source.ProfileImagePath)
+                .FirstOrDefault(path => File.Exists(path) && ProfileStore.IsHiveInUse(path));
+            if (lockedHive is not null)
+            {
+                errors.Add($"{label}: {lockedHive} is in use. The user is signed in or Windows still has their profile loaded. Sign them out or restart the computer, then try again.");
+            }
+        }
 
         LocalAccountName.TryNormalize(mapping.Target, Environment.MachineName, out var targetName, out _);
         var targetSid = LocalAccounts.TryGetSid(targetName);

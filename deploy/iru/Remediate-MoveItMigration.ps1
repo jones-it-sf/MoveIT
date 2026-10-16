@@ -62,14 +62,35 @@ $transcript = Join-Path $logDir ("iru-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
 Start-Transcript -Path $transcript -Append | Out-Null
 
 function Test-AnyUserLoggedOn {
-    # explorer.exe runs once per interactive desktop session; its presence means someone is on.
+    # Use several independent signals. Win32_Process returned no explorer.exe on at least one
+    # Iru/SYSTEM run even though the console user was active, so no single WMI query is sufficient.
     try {
-        $sessions = Get-CimInstance Win32_Process -Filter "Name='explorer.exe'" -ErrorAction Stop
-        return [bool]$sessions
+        $explorer = Get-Process -Name explorer -ErrorAction SilentlyContinue |
+            Where-Object { $_.SessionId -gt 0 }
+        if ($explorer) { return $true }
     }
-    catch {
-        return $false
+    catch { }
+
+    try {
+        $consoleUser = (Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).UserName
+        if (-not [string]::IsNullOrWhiteSpace($consoleUser)) { return $true }
     }
+    catch { }
+
+    try {
+        # A loaded user hive is the condition that actually blocks MoveIT. Include local/domain
+        # user SIDs and Entra user SIDs, but ignore the corresponding *_Classes keys.
+        $loadedUserHives = Get-ChildItem Registry::HKEY_USERS -ErrorAction Stop |
+            Where-Object {
+                $_.PSChildName -notlike '*_Classes' -and
+                ($_.PSChildName -match '^S-1-5-21-(\d+-){3}\d+$' -or
+                 $_.PSChildName -match '^S-1-12-1-(\d+-){3}\d+$')
+            }
+        if ($loadedUserHives) { return $true }
+    }
+    catch { }
+
+    return $false
 }
 
 $exitCode = 1
